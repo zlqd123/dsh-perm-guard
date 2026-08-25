@@ -101,7 +101,7 @@ t('Rename-Item trust allow', (() => { const r = M.classifyBash(`Rename-Item -Pat
 t('Compress-Archive trust allow', M.classifyBash(`Compress-Archive -Path ${HOME}\\.dsh\\logs -DestinationPath ${HOME}\\.dsh\\logs.zip`, roots, catsStd, 'standard').d === 'allow')
 t('Expand-Archive outside ask', (() => { const r = M.classifyBash(`Expand-Archive -Path ${HOME}\\.dsh\\pkg.zip -DestinationPath D:\\elsewhere\\out`, roots, catsStd, 'standard'); return r.d === 'ask' })())
 t('Copy-Item trust->outside ask (-Destination)', M.classifyBash(`Copy-Item -Path ${HOME}\\.dsh\\f.txt -Destination D:\\elsewhere\\f.txt`, roots, catsStd, 'standard').d === 'ask')
-t('del -> delete locked ask', (() => { const r = M.classifyBash(`del ${HOME}\\.dsh\\x.tmp`, roots, catsStd, 'standard'); return r.c === 'delete' && r.d === 'ask' })())
+t('del -> danger parity via alias rewrite', (() => { const r = M.classifyBash(`del ${HOME}\\.dsh\\x.tmp`, roots, catsStd, 'standard'); return r.c === 'danger' && r.d === 'ask' })())
 t('reg query readonly allow', (() => { const r = M.classifyBash('reg query HKLM\\SOFTWARE\\Microsoft', roots, catsStd, 'standard'); return r.c === 'readOnly' && r.d === 'allow' })())
 t('netsh -> privilege', M.classifyBash('netsh advfirewall set allprofiles state off', roots, catsStd, 'standard').c === 'privilege')
 t('dism -> privilege', M.classifyBash('dism /online /enable-feature /featurename:X', roots, catsStd, 'standard').c === 'privilege')
@@ -116,7 +116,34 @@ t('dotnet publish -> publish', M.classifyBash('dotnet publish -c Release', roots
 t('C:\\Windows write now protected', (() => { const r = M.classifyBash('Set-Content -Path C:\\Windows\\Temp\\x.txt hi', roots, catsStd, 'standard'); return r.c === 'protected' })())
 t('fsutil -> danger', M.classifyBash('fsutil behavior set symlinkEvaluation R2L:1', roots, catsStd, 'standard').c === 'danger')
 t('gsudo -> danger', M.classifyBash('gsudo apt upgrade', roots, catsStd, 'standard').c === 'danger')
-// 审查修复回归（2026-08-24）：引号+空格路径不得截成半截（半截落信任内会误放行越界写）
+
+// ---- 五轮：PowerShell 别名归一化 + 安全词表增量（2026-08-24）----
+t('alias gc pipeline allow', M.classifyBash(`gc ${HOME}\\.dsh\\x.log | Select-Object -First 5`, roots, catsStd, 'standard').d === 'allow')
+t('alias gci readonly allow', (() => { const r = M.classifyBash(`gci ${HOME}\\.dsh`, roots, catsStd, 'standard'); return r.c === 'readOnly' && r.d === 'allow' })())
+t('alias ni trust allow (fileEdit)', (() => { const r = M.classifyBash(`ni ${HOME}\\.dsh\\a.tmp -ItemType File`, roots, catsStd, 'standard'); return r.c === 'fileEdit' && r.d === 'allow' })())
+t('alias cpi trust allow', M.classifyBash(`cpi ${HOME}\\.dsh\\f.txt ${HOME}\\.dsh\\g.txt`, roots, catsStd, 'standard').d === 'allow')
+t('alias ri -> danger parity with Remove-Item', M.classifyBash('ri C:\\tmp\\x', roots, catsStd, 'standard').c === 'danger')
+t('alias rm trust file still danger', M.classifyBash(`rm ${HOME}\\.dsh\\f.txt`, roots, catsStd, 'standard').c === 'danger')
+t('alias sls allow', M.classifyBash(`sls pattern ${HOME}\\.dsh\\log.txt`, roots, catsStd, 'standard').d === 'allow')
+t('alias curl -> networkExec', M.classifyBash('curl https://example.com', roots, catsStd, 'standard').c === 'networkExec')
+t('alias start -> privilege', M.classifyBash('start notepad', roots, catsStd, 'standard').c === 'privilege')
+t('python -m pytest -> build', M.classifyBash('python -m pytest tests/', roots, catsStd, 'standard').c === 'build')
+t('python -m pip install -> build', M.classifyBash('python -m pip install requests', roots, catsStd, 'standard').c === 'build')
+t('python -m os -> privilege ask', (() => { const r = M.classifyBash('python -m os', roots, catsStd, 'standard'); return r.c === 'privilege' && r.d === 'ask' })())
+t('git init -> gitLocal allow', (() => { const r = M.classifyBash('git init', roots, catsStd, 'standard'); return r.c === 'gitLocal' && r.d === 'allow' })())
+t('git apply -> gitLocal allow', M.classifyBash('git apply patch.diff', roots, catsStd, 'standard').d === 'allow')
+t('pnpm list -> build allow', (() => { const r = M.classifyBash('pnpm list', roots, catsStd, 'standard'); return r.c === 'build' && r.d === 'allow' })())
+t('cargo check -> build allow', (() => { const r = M.classifyBash('cargo check', roots, catsStd, 'standard'); return r.c === 'build' && r.d === 'allow' })())
+t('Test-NetConnection readonly allow', M.classifyBash('Test-NetConnection example.com -Port 443', roots, catsStd, 'standard').c === 'readOnly')
+t('Import-Csv readonly allow', M.classifyBash(`Import-Csv ${HOME}\\.dsh\\data.csv`, roots, catsStd, 'standard').c === 'readOnly')
+t('Start-Transcript trust allow', M.classifyBash(`Start-Transcript -Path ${HOME}\\.dsh\\session.log`, roots, catsStd, 'standard').d === 'allow')
+
+// ---- 六轮：known_hosts 只读豁免（2026-08-25）----
+t('read .ssh/known_hosts exempted (readOnly allow)', (() => { const r = M.classifyBash(`Get-Content ${HOME}\\.ssh\\known_hosts`, roots, catsStd, 'standard'); return r.c === 'readOnly' && r.d === 'allow' })())
+t('write known_hosts still protected', (() => { const r = M.classifyBash(`Set-Content -Path ${HOME}\\.ssh\\known_hosts -Value x`, roots, catsStd, 'standard'); return r.c === 'protected' && r.d === 'ask' })())
+t('other .ssh files still protected', (() => { const r = M.classifyBash(`Get-Content ${HOME}\\.ssh\\id_rsa`, roots, catsStd, 'standard'); return r.c === 'protected' })())
+
+// ---- 上游审查修复回归（2026-08-24）：引号+空格路径不得截成半截（半截落信任内会误放行越界写）----
 t('quoted path with spaces NOT half-truncated (outside trust still ask)', (() => {
   const r = M.classifyBash(`Set-Content -Path "C:\\Users\\John Doe\\..\\..\\..\\Windows\\Temp\\x.txt" -Value hi`, roots, catsStd, 'standard')
   return r.d === 'ask'
